@@ -12,7 +12,7 @@ class Student(Base):
     username = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
-    direction_id = Column(Integer, ForeignKey("directions.id"))
+    direction_id = Column(Integer, ForeignKey("directions.id", ondelete="CASCADE"))
     created_at = Column(DateTime, default=lambda: datetime.utcnow())
 
     direction = relationship("Direction", back_populates="students")
@@ -35,10 +35,10 @@ class Test(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     question = Column(Text, nullable=False)
-    direction_id = Column(Integer, ForeignKey("directions.id"))
+    direction_id = Column(Integer, ForeignKey("directions.id", ondelete="CASCADE"))
 
     direction = relationship("Direction", back_populates="tests")
-    answers = relationship("TestAnswer", back_populates="test", cascade="all, delete-orphan")
+    answers = relationship("TestAnswer", back_populates="test")
 
 
 class TestAnswer(Base):
@@ -48,7 +48,7 @@ class TestAnswer(Base):
     text = Column(String(255), nullable=False)
     is_correct = Column(Boolean, default=False)
 
-    test_id = Column(Integer, ForeignKey("tests.id"))
+    test_id = Column(Integer, ForeignKey("tests.id", ondelete="CASCADE"))
     test = relationship("Test", back_populates="answers")
 
 
@@ -56,7 +56,7 @@ class Rating(Base):
     __tablename__ = "ratings"
 
     id = Column(Integer, primary_key=True, index=True)
-    rating = Column(String, nullable=False, unique=True)  # A, B, C
+    rating = Column(String, nullable=False, unique=True)  
 
     results = relationship("StudentResult", back_populates="rating")
     videos = relationship("Video", back_populates="rating")
@@ -67,7 +67,7 @@ class StudentResult(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("students.id"))
-    rating_id = Column(Integer, ForeignKey("ratings.id"))
+    rating_id = Column(Integer, ForeignKey("ratings.id", ondelete="CASCADE"))
 
     student = relationship("Student", back_populates="results")
     rating = relationship("Rating", back_populates="results")
@@ -80,20 +80,31 @@ class Video(Base):
     title = Column(String(255), nullable=False)
     url = Column(String(500), nullable=False)
 
-    direction_id = Column(Integer, ForeignKey("directions.id"))
-    rating_id = Column(Integer, ForeignKey("ratings.id"))
+    direction_id = Column(Integer, ForeignKey("directions.id", ondelete="CASCADE"))
+    rating_id = Column(Integer, ForeignKey("ratings.id", ondelete="CASCADE"))
 
     direction = relationship("Direction", back_populates="videos")
     rating = relationship("Rating", back_populates="videos")
-    questions = relationship("VideoQuestion", back_populates="video", cascade="all, delete-orphan")
+    questions = relationship("VideoQuestion", back_populates="video")
 
 
 class VideoQuestion(Base):
     __tablename__ = "video_questions"
 
     id = Column(Integer, primary_key=True, index=True)
-    video_id = Column(Integer, ForeignKey("videos.id"))
+    video_id = Column(Integer, ForeignKey("videos.id", ondelete="CASCADE"))
     question = Column(Text, nullable=False)
-    answer = Column(String(255), nullable=False)
 
     video = relationship("Video", back_populates="questions")
+    question_answers = relationship("VideoQuestionAnswer", back_populates="video_question")
+
+
+class VideoQuestionAnswer(Base):
+    __tablename__ = "video_question_answers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(String(255), nullable=False)
+    is_correct = Column(Boolean, default=False)
+
+    video_question_id = Column(Integer, ForeignKey("video_questions.id", ondelete="CASCADE"))
+    video_question = relationship("VideoQuestion", back_populates="question_answers")
