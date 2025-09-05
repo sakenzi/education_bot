@@ -1,6 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from db.models import Direction
-from db.database import async_sessionmaker
+from db.database import async_session_factory
+
 
 # Кнопка отправки номера
 phone_kb = ReplyKeyboardMarkup(
@@ -10,7 +11,7 @@ phone_kb = ReplyKeyboardMarkup(
 
 # Динамическая клавиатура направлений
 async def directions_kb():
-    async with async_sessionmaker() as session:
+    async with async_session_factory() as session:
         result = await session.execute(Direction.__table__.select())
         directions = result.fetchall()
 

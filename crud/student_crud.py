@@ -1,19 +1,22 @@
 from db.models import Student, Direction
-from db.database import async_sessionmaker
+from db.database import async_session_factory
+from sqlalchemy import select
 
 
-async def create_student(telegram_id: str, username: str, name: str, phone: str, direction_name: int):
-    async with async_sessionmaker() as session:
-        direction = (await session.execute(
-            Direction.__table__.select().where(Direction.name == direction_name)
-        )).first
+async def create_student(telegram_id: str, username: str, full_name: str, phone: str, direction_name: str):
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Direction).where(Direction.name == direction_name)
+        )
+        direction = result.scalars().first()
+
         if not direction:
             return None
         
         student = Student(
             telegram_id=telegram_id,
             username=username or "",
-            full_name=name,
+            full_name=full_name,
             phone_number=phone,
             direction_id=direction.id
         )
