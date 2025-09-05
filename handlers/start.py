@@ -5,6 +5,7 @@ from states.register import RegisterForm
 from keyboards.register import directions_kb, phone_kb
 from crud.student_crud import create_student
 from aiogram.fsm.context import FSMContext
+from keyboards.subscribe import test_start_kb
 
 
 router = Router()
@@ -53,5 +54,10 @@ async def get_direction(message: types.Message, state: FSMContext):
     await message.answer(
         f"Жарайсың {data['full_name']}! 🎉 Сен {message.text} бағытына тіркелдің!",
         reply_markup=types.ReplyKeyboardRemove()
+    )
+
+    await message.answer(
+        "Енді сенің рейтингіңді анықтау үшін тесттен өтуің керек.",
+        reply_markup=test_start_kb()
     )
     await state.clear()
