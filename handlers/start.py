@@ -5,7 +5,9 @@ from states.register import RegisterForm
 from keyboards.register import directions_kb, phone_kb
 from crud.student_crud import create_student
 from aiogram.fsm.context import FSMContext
-from keyboards.subscribe import test_start_kb
+from keyboards.subscribe import start_kb
+from aiogram.exceptions import TelegramNetworkError
+import logging
 
 
 router = Router()
@@ -13,10 +15,24 @@ router = Router()
 @router.message(CommandStart())
 async def start_handler(message: Message, state: FSMContext):
     await message.answer("Сәлем түлек, біздің ботқа қош келдің, сені көргенімізге қуаныштымыз!")
-    welcome_video = FSInputFile("media/IMG_4331.MP4")
-    await message.answer_video(
-        video=welcome_video
-    )
+    
+    video_path = "media/IMG_4331.MP4"
+    
+    try:
+        welcome_video = FSInputFile(video_path)
+        await message.answer_video(
+            video=welcome_video,
+            caption="Қош келдің абитуриент!",
+            timeout=15 
+        )
+        logging.info("Видео успешно отправлено")
+    except TelegramNetworkError as e:
+        await message.answer("❌ Желі қатесіне байланысты бейнені жіберу мүмкін болмады. Тағы жасауды сәл кейінірек көріңізді өтінеміз.")
+    except FileNotFoundError:
+        await message.answer("❌ Қате: бейне серверде табылмады.")
+    except Exception as e:
+        await message.answer("❌ Қате орын алды. Cәл кейінірек көруріңізді өтінеміз.")
+    
     await message.answer("Танысып алайық! Аты-жөніңді жаз 👇")
     await state.set_state(RegisterForm.name)
 
@@ -57,7 +73,7 @@ async def get_direction(message: types.Message, state: FSMContext):
     )
 
     await message.answer(
-        "Енді сенің рейтингіңді анықтау үшін тесттен өтуің керек.",
-        reply_markup=test_start_kb()
+        "Енді сен деңгейіңді анықтау үшін тесттен өтуің керек, бірақ бірінші мына каналдарға тіркеліп ал 👇",
+        reply_markup=start_kb()
     )
     await state.clear()
