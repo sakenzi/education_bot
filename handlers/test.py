@@ -3,6 +3,8 @@ from aiogram.fsm.context import FSMContext
 from crud import test_crud
 from handlers.subscribe import CHANNELS
 from keyboards.subscribe import subscribe_kb
+from keyboards.subscribe import test_start_kb
+from keyboards.video import video_kb
 
 
 router = Router()
@@ -106,8 +108,42 @@ async def finish_test(message: types.Message, state: FSMContext):
     correct = data["correct"]
     total = len(data["tests"])
 
-    student = await test_crud.get_student_by_telegram_id(str(message.chat.id))
-    await test_crud.save_student_result(student.id)
+    if total != 10:
+        await message.answer("Тест дайындалуда, кішкене күте тұр 😉")
+        await state.clear()
+        return
 
-    await message.answer(f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉")
+    if correct <= 3:
+        rating_name = "A"
+    elif 4 <= correct <= 6:
+        rating_name = "B"
+    else:
+        rating_name = "C"
+
+    student = await test_crud.get_student_by_telegram_id(str(message.chat.id))
+    if not student:
+        await message.answer("❌ Техникалық ақау, абитуриент табылмады")
+        await state.clear()
+        return
+
+    rating = await test_crud.get_rating(rating_name)
+    if not rating:
+        await message.answer(f"Т❌ Техникалық ақау: Деңгей {rating_name} табылмады!")
+        await state.clear()
+        return
+
+    await test_crud.save_student_result(student.id, rating.id)
+
+    video = await test_crud.get_video_by_rating_and_direction(rating.id, student.direction_id)
+    video_message = (
+        f"🎥 Сенің  деңгейіңе арналған сынақ сабағы ({rating_name}): {video.title}\n"
+        f"Сілтеме: {video.url}" if video else "❌ Сенің деңгейіңе арналған бейнежазба табылмады."
+    )
+
+    await message.answer(
+        f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n"
+        f"Сенің деңгейің: {rating_name}\n"
+        f"{video_message}",
+        reply_markup=video_kb(video.url) if video else test_start_kb() 
+    )
     await state.clear()
