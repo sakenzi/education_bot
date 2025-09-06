@@ -1,13 +1,13 @@
-from aiogram import Router, types, F
+from aiogram import Router, F
 from aiogram.types import CallbackQuery
-from keyboards.subscribe import subscribe_kb, test_start_kb
-from states.test import TestForm
 from aiogram.fsm.context import FSMContext
+from keyboards.subscribe import subscribe_kb, test_start_kb
 
 
 router = Router()
 
 CHANNELS = ["@testqa_arnalgan", "@testqa_arnalgan_kanal"]
+
 
 @router.callback_query(F.data == "start_test")
 async def ask_subscribe(callback: CallbackQuery):
@@ -33,4 +33,7 @@ async def check_subscriptions(callback: CallbackQuery, bot, state: FSMContext):
             reply_markup=subscribe_kb()
         )
     else:
-        await callback.message.answer("✅ Рахмет! Енді сен тестті өте аласың 🎉", reply_markup=test_start_kb())
+        await callback.message.answer(
+            "✅ Рахмет! Енді сен тестті өте аласың 🎉",
+            reply_markup=test_start_kb()
+        )

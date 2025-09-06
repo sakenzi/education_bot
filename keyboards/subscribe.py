@@ -9,7 +9,8 @@ def subscribe_kb() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+
 def test_start_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📘 Тест өту", callback_data="start_test")]
+        [InlineKeyboardButton(text="📘 Тест өту", callback_data="real_start_test")]
     ])
