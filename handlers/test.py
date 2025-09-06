@@ -1,12 +1,15 @@
 import logging
 from aiogram import Router, F, types, Bot
+from aiogram.types import InlineKeyboardMarkup
+from keyboards.course import course_button
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramNetworkError
 from crud import test_crud
 from handlers.subscribe import CHANNELS
 from keyboards.subscribe import subscribe_kb, test_start_kb
 from keyboards.video import video_kb
-
+from handlers.discount_reminder import schedule_discount_reminders
+from datetime import datetime
 
 router = Router()
 
@@ -21,6 +24,7 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
             if chat_member.status in ["left", "kicked"]:
                 not_subscribed.append(channel)
         except Exception as e:
+            logging.error(f"Ошибка при проверке подписки на {channel}: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             not_subscribed.append(channel)
 
     if not_subscribed:
@@ -55,37 +59,34 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
         current=0,
         correct=0
     )
+    await send_question(callback.message, state, bot)
 
-    await send_question(callback.message, state)
-
-async def send_question(message: types.Message, state: FSMContext):
+async def send_question(message: types.Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     test_ids = data.get("tests", [])
     current = data.get("current", 0)
 
     if current >= len(test_ids):
-        await finish_test(message, state)
+        await finish_test(message, state, bot)
         return
 
     test = await test_crud.get_test_by_id(test_ids[current])
     if not test:
         await state.update_data(current=current + 1)
-        await send_question(message, state)
+        await send_question(message, state, bot)
         return
 
     answers = await test_crud.get_answers_by_test(test.id)
     if len(answers) < 2:
         await state.update_data(current=current + 1)
-        await send_question(message, state)
+        await send_question(message, state, bot)
         return
 
     options = [a.text for a in answers]
-    correct_option_id = next(
-        (i for i, a in enumerate(answers) if a.is_correct), None
-    )
+    correct_option_id = next((i for i, a in enumerate(answers) if a.is_correct), None)
     if correct_option_id is None:
         await state.update_data(current=current + 1)
-        await send_question(message, state)
+        await send_question(message, state, bot)
         return
 
     try:
@@ -100,10 +101,10 @@ async def send_question(message: types.Message, state: FSMContext):
     except TelegramNetworkError as e:
         await message.answer("❌ Хабарды жіберу мүмкін болмады. Қайтадан байқап көр")
         await state.update_data(current=current + 1)
-        await send_question(message, state)
+        await send_question(message, state, bot)
 
 @router.poll_answer()
-async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext):
+async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext, bot: Bot):
     data = await state.get_data()
     current = data.get("current", 0)
     test_ids = data.get("tests", [])
@@ -111,9 +112,7 @@ async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext):
     test = await test_crud.get_test_by_id(test_ids[current])
     answers = await test_crud.get_answers_by_test(test.id)
 
-    correct_option_id = next(
-        (i for i, a in enumerate(answers) if a.is_correct), None
-    )
+    correct_option_id = next((i for i, a in enumerate(answers) if a.is_correct), None)
     chosen = poll.option_ids[0] if poll.option_ids else None
 
     correct = data.get("correct", 0)
@@ -125,20 +124,22 @@ async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext):
         correct=correct
     )
 
-    bot: Bot = poll.bot
     chat_id = poll.user.id
     try:
-        await send_question(await bot.send_message(chat_id, "Келесі сұрақ 👇"), state)
+        await send_question(await bot.send_message(chat_id, "Келесі сұрақ 👇"), state, bot)
     except TelegramNetworkError as e:
         await bot.send_message(chat_id, "❌ Хабарды жіберу мүмкін болмады. Қайтадан байқап көр")
 
-async def finish_test(message: types.Message, state: FSMContext):
+async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     correct = data.get("correct", 0)
     total = len(data.get("tests", []))
 
     if total != 10:
-        await message.answer("❌ Тесттер әлі дайын емес, кейінірек қайталап көр! 😉")
+        try:
+            await message.answer("❌ Тесттер әлі дайын емес, кейінірек қайталап көр! 😉")
+        except TelegramNetworkError as e:
+            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
@@ -154,13 +155,19 @@ async def finish_test(message: types.Message, state: FSMContext):
 
     student = await test_crud.get_student_by_telegram_id(str(message.chat.id))
     if not student:
-        await message.answer("❌ Техникалық ақау, абитуриент табылмады")
+        try:
+            await message.answer("❌ Техникалық ақау, абитуриент табылмады")
+        except TelegramNetworkError as e:
+            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
     rating = await test_crud.get_rating(rating_name)
     if not rating:
-        await message.answer(f"❌ Техникалық ақау: Деңгей {rating_name} табылмады!")
+        try:
+            await message.answer(f"❌ Техникалық ақау: Деңгей {rating_name} табылмады!")
+        except TelegramNetworkError as e:
+            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
@@ -179,6 +186,7 @@ async def finish_test(message: types.Message, state: FSMContext):
     )
     reply_markup = video_kb(video.url) if video else test_start_kb()
 
+    course_text = "📚 Рейтингіңді көтеру үшін арнайы курс бар! 30 минут ішінде жазылыңыз, жеңілдікпен!"
     try:
         await message.answer(
             f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n"
@@ -186,9 +194,8 @@ async def finish_test(message: types.Message, state: FSMContext):
             f"{video_message}",
             reply_markup=reply_markup
         )
-        logging.info(f"Результат теста отправлен пользователю {message.from_user.id}")
+        await message.answer(course_text)
     except TelegramNetworkError as e:
-        logging.error(f"Сетевая ошибка при отправке результата: {e}")
         await message.answer(
             "❌ Желі қатесіне байланысты нәтиже жіберу мүмкін болмады. Әрекетті кейінірек қайтала",
             reply_markup=test_start_kb()
@@ -199,4 +206,12 @@ async def finish_test(message: types.Message, state: FSMContext):
             reply_markup=test_start_kb()
         )
 
+    try:
+        await message.answer("", reply_markup=course_button)
+    except TelegramNetworkError as e:
+        logging.error(f"Сетевая ошибка при отправке кнопки курса: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        logging.error(f"Непредвиденная ошибка при отправке кнопки курса: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await schedule_discount_reminders(bot, message.chat.id)
     await state.clear()
