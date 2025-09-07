@@ -1,6 +1,6 @@
 import logging
 from aiogram import Router, F, types, Bot
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InputFile, FSInputFile
 from keyboards.course import course_button
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramNetworkError
@@ -24,7 +24,6 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
             if chat_member.status in ["left", "kicked"]:
                 not_subscribed.append(channel)
         except Exception as e:
-            logging.error(f"Ошибка при проверке подписки на {channel}: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             not_subscribed.append(channel)
 
     if not_subscribed:
@@ -139,7 +138,7 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         try:
             await message.answer("❌ Тесттер әлі дайын емес, кейінірек қайталап көр! 😉")
         except TelegramNetworkError as e:
-            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.error(f"Хабарды жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
@@ -158,7 +157,7 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         try:
             await message.answer("❌ Техникалық ақау, абитуриент табылмады")
         except TelegramNetworkError as e:
-            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.error(f"Хабарды жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
@@ -167,14 +166,14 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         try:
             await message.answer(f"❌ Техникалық ақау: Деңгей {rating_name} табылмады!")
         except TelegramNetworkError as e:
-            logging.error(f"Сетевая ошибка при отправке сообщения: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.error(f"Хабарды жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await state.clear()
         return
 
     try:
         await test_crud.save_student_result(student.id, rating.id)
     except Exception as e:
-        await message.answer("❌ Техникалық ақау при сохранении результата!")
+        await message.answer("❌ Результаттты сақтау кезіндегі желілік ақау!")
         await state.clear()
         return
 
@@ -186,7 +185,7 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
     )
     reply_markup = video_kb(video.url) if video else test_start_kb()
 
-    course_text = "📚 Рейтингіңді көтеру үшін арнайы курс бар! 30 минут ішінде жазылыңыз, жеңілдікпен!"
+    course_text = "📚 Деңгейіңді көтеру үшін арнайы курс бар! 1 сағат ішінде жазылып үлгеріңіз, жеңілдікпен!"
     try:
         await message.answer(
             f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n"
@@ -205,13 +204,20 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
             "❌ Желі қатесіне байланысты нәтиже жіберу мүмкін болмады. Әрекетті кейінірек қайтала",
             reply_markup=test_start_kb()
         )
+    try:
+        photo = FSInputFile("media/hqdefault.jpg")  
+        await message.answer_photo(photo, caption="📸 Арнайы курс туралы ақпарат!")
+    except TelegramNetworkError as e:
+        logging.error(f"Суретті жіберу ақауы: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        logging.error(f"Суретті жіберу ақауы: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
-        await message.answer("", reply_markup=course_button)
+        await message.answer("Курсқа тіркелу 👇", reply_markup=course_button)  
     except TelegramNetworkError as e:
-        logging.error(f"Сетевая ошибка при отправке кнопки курса: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.error(f"Кнопканы жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except Exception as e:
-        logging.error(f"Непредвиденная ошибка при отправке кнопки курса: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.error(f"Кнопканы жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     await schedule_discount_reminders(bot, message.chat.id)
     await state.clear()
