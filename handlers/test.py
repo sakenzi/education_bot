@@ -1,6 +1,7 @@
 import logging
+import asyncio
 from aiogram import Router, F, types, Bot
-from aiogram.types import InputFile, FSInputFile
+from aiogram.types import FSInputFile
 from keyboards.course import course_button
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramNetworkError
@@ -9,7 +10,7 @@ from handlers.subscribe import CHANNELS
 from keyboards.subscribe import subscribe_kb, test_start_kb
 from keyboards.video import video_kb
 from handlers.discount_reminder import schedule_discount_reminders
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = Router()
 
@@ -56,7 +57,9 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
     await state.update_data(
         tests=[t.id for t in tests],
         current=0,
-        correct=0
+        correct=0,
+        first_half_correct=0,
+        second_half_correct=0
     )
     await send_question(callback.message, state, bot)
 
@@ -107,6 +110,8 @@ async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext, bot: Bot
     data = await state.get_data()
     current = data.get("current", 0)
     test_ids = data.get("tests", [])
+    first_half_correct = data.get("first_half_correct", 0)
+    second_half_correct = data.get("second_half_correct", 0)
 
     test = await test_crud.get_test_by_id(test_ids[current])
     answers = await test_crud.get_answers_by_test(test.id)
@@ -114,13 +119,20 @@ async def handle_poll_answer(poll: types.PollAnswer, state: FSMContext, bot: Bot
     correct_option_id = next((i for i, a in enumerate(answers) if a.is_correct), None)
     chosen = poll.option_ids[0] if poll.option_ids else None
 
-    correct = data.get("correct", 0)
-    if chosen == correct_option_id:
-        correct += 1
+    is_correct = chosen == correct_option_id
+
+    if current < 5:
+        first_half_correct += 1 if is_correct else 0
+    else:
+        second_half_correct += 1 if is_correct else 0
+
+    total_correct = data.get("correct", 0) + (1 if is_correct else 0)
 
     await state.update_data(
         current=current + 1,
-        correct=correct
+        correct=total_correct,
+        first_half_correct=first_half_correct,
+        second_half_correct=second_half_correct
     )
 
     chat_id = poll.user.id
@@ -133,6 +145,8 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     correct = data.get("correct", 0)
     total = len(data.get("tests", []))
+    first_half_correct = data.get("first_half_correct", 0)
+    second_half_correct = data.get("second_half_correct", 0)
 
     if total != 10:
         try:
@@ -142,15 +156,19 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
-    if correct <= 3:
-        rating_name = "A"
-        rating_text = "абитуриент деңгейің нашар, кем дегенде базаны үйреніп алшы 🙈"
-    elif 4 <= correct <= 6:
-        rating_name = "B"
-        rating_text = "базаны жақсы білесің, бірақ баллыңды көбейту үшін мына бейнежазбаны қарап алшы 👌🏿"
+    if first_half_correct <= 2:
+        first_rating_name = "A"
+    elif first_half_correct == 3:
+        first_rating_name = "B"
     else:
-        rating_name = "C"
-        rating_text = "Жарайсың енді максимум балл алу үшін қиын бөлімдерді қарап шығу керек, мына бейнежазбаны қарап көрші ✌🏽"
+        first_rating_name = "C"
+
+    if second_half_correct <= 2:
+        second_rating_name = "A"
+    elif second_half_correct == 3:
+        second_rating_name = "B"
+    else:
+        second_rating_name = "C"
 
     student = await test_crud.get_student_by_telegram_id(str(message.chat.id))
     if not student:
@@ -161,49 +179,64 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
-    rating = await test_crud.get_rating(rating_name)
-    if not rating:
-        try:
-            await message.answer(f"❌ Техникалық ақау: Деңгей {rating_name} табылмады!")
-        except TelegramNetworkError as e:
-            logging.error(f"Хабарды жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        await state.clear()
-        return
+    first_rating = await test_crud.get_rating(first_rating_name)
+    second_rating = await test_crud.get_rating(second_rating_name)
 
-    try:
-        await test_crud.save_student_result(student.id, rating.id)
-    except Exception as e:
-        await message.answer("❌ Результаттты сақтау кезіндегі желілік ақау!")
-        await state.clear()
-        return
+    if first_rating and second_rating:
+        first_videos = await test_crud.get_videos_by_rating_and_direction(first_rating.id, student.direction_id)
+        second_videos = await test_crud.get_videos_by_rating_and_direction(second_rating.id, student.direction_id)
 
-    video = await test_crud.get_video_by_rating_and_direction(rating.id, student.direction_id)
-    video_message = (
-        f"🎥 Сенің деңгейіңе арналған сынақ сабағы ({rating_name}): {video.title}\n"
-        f"Сілтеме: {video.url}" if video else "❌ Сенің деңгейіңе арналған бейнежазба табылмады.\n"
-        "Басқа сабақтарды көру үшін админмен байланыс!"
-    )
-    reply_markup = video_kb(video.url) if video else test_start_kb()
+        first_video = first_videos[0] if first_videos else None
+        second_video = first_videos[1] if len(first_videos) > 1 else second_videos[0] if second_videos else None
+    else:
+        first_video = None
+        second_video = None
 
-    course_text = "📚 Деңгейіңді көтеру үшін арнайы курс бар! 1 сағат ішінде жазылып үлгеріңіз, жеңілдікпен!"
+    if first_rating:
+        await test_crud.save_student_result(student.id, first_rating.id)
+
     try:
         await message.answer(
-            f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n"
-            f"Сенің деңгейің: {rating_name} - {rating_text}\n"
-            f"{video_message}",
-            reply_markup=reply_markup
+            f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n\n"
+            f"Бірінші таңдау пән бойынша: {first_half_correct}/5 ({first_rating_name} деңгей)\n"
+            f"Екінші таңдау пән бойынша: {second_half_correct}/5 ({second_rating_name} деңгей)",
         )
-        await message.answer(course_text)
     except TelegramNetworkError as e:
         await message.answer(
             "❌ Желі қатесіне байланысты нәтиже жіберу мүмкін болмады. Әрекетті кейінірек қайтала",
             reply_markup=test_start_kb()
         )
     except Exception as e:
+        logging.error(f"Нәтиже жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         await message.answer(
-            "❌ Желі қатесіне байланысты нәтиже жіберу мүмкін болмады. Әрекетті кейінірек қайтала",
+            "❌ Техникалық ақау туындады. Әрекетті кейінірек қайтала",
             reply_markup=test_start_kb()
         )
+
+    if first_video:
+        try:
+            await message.answer(
+                f"🎥 Бірінші таңдау пәнге арналған сабақ: {first_video.title}\nСілтеме: {first_video.url}"
+            )
+        except TelegramNetworkError as e:
+            logging.error(f"Бірінші видео жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Бірінші видео жіберу мүмкін болмады. Кейінірек қайталаңыз")
+        except Exception as e:
+            logging.error(f"Бірінші видео жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Бірінші видео жіберу кезінде техникалық ақау туындады")
+
+    if second_video:
+        try:
+            await message.answer(
+                f"🎥 Екінші таңдау пәнге арналған сабақ: {second_video.title}\nСілтеме: {second_video.url}"
+            )
+        except TelegramNetworkError as e:
+            logging.error(f"Екінші видео жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Екінші видео жіберу мүмкін болмады. Кейінірек қайталаңыз")
+        except Exception as e:
+            logging.error(f"Екінші видео жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Екінші видео жіберу кезінде техникалық ақау туындады")
+
     try:
         photo = FSInputFile("media/hqdefault.jpg")  
         await message.answer_photo(photo, caption="📸 Арнайы курс туралы ақпарат!")
@@ -212,12 +245,20 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
     except Exception as e:
         logging.error(f"Суретті жіберу ақауы: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+    discount_end_time = datetime.now() + timedelta(hours=1)
+    discount_end_message = discount_end_time.strftime("%H:%M")
+    course_text = f"📚 Деңгейіңді көтеру үшін арнайы курс бар! 1 сағат ішінде жазылып үлгеріңіз, жеңілдікпен! Жеңілдіктің аяқталу уақыты {discount_end_message}."
+
     try:
-        await message.answer("Курсқа тіркелу 👇", reply_markup=course_button)  
+        await message.answer(course_text)
+        await asyncio.sleep(0.5)
+        await message.answer("Курсқа тіркелу 👇", reply_markup=course_button)
     except TelegramNetworkError as e:
-        logging.error(f"Кнопканы жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.error(f"Курс хабарламасын жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        await message.answer("❌ Желі қатесіне байланысты курс хабарламасын жіберу мүмкін болмады. Кейінірек қайталаңыз")
     except Exception as e:
-        logging.error(f"Кнопканы жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.error(f"Курс хабарламасын жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        await message.answer("❌ Техникалық ақау туындады. Кейінірек қайталаңыз")
 
     await schedule_discount_reminders(bot, message.chat.id)
     await state.clear()

@@ -38,13 +38,15 @@ async def save_student_result(student_id: int, rating_id: int):
         await session.commit()
 
 
-async def get_video_by_rating_and_direction(rating_id: int, direction_id: int):
+async def get_videos_by_rating_and_direction(rating_id: int, direction_id: int) -> list[Video]:
+    """Retrieve videos filtered by rating and direction, ordered by ID."""
     async with async_session_factory() as session:
-        return (await session.execute(
-            select(Video)
-            .where(Video.rating_id == rating_id, Video.direction_id == direction_id)
-            .limit(1)  
-        )).scalars().first()
+        stmt = select(Video).where(
+            Video.rating_id == rating_id,
+            Video.direction_id == direction_id
+        ).order_by(Video.id)
+        result = await session.execute(stmt)
+        return result.scalars().all()
     
 
 async def get_rating(rating_name: str):
