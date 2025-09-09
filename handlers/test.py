@@ -1,16 +1,16 @@
 import logging
 import asyncio
 from aiogram import Router, F, types, Bot
-from aiogram.types import FSInputFile
-from keyboards.course import course_button
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramNetworkError
 from crud import test_crud
 from handlers.subscribe import CHANNELS
 from keyboards.subscribe import subscribe_kb, test_start_kb
-from keyboards.video import video_kb
+from keyboards.course import course_button
 from handlers.discount_reminder import schedule_discount_reminders
 from datetime import datetime, timedelta
+from keyboards.video import switch_keyboard
 
 router = Router()
 
@@ -195,6 +195,14 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
     if first_rating:
         await test_crud.save_student_result(student.id, first_rating.id)
 
+    await state.update_data(
+        first_video=first_video,
+        second_video=second_video,
+        first_rating_name=first_rating_name,
+        second_rating_name=second_rating_name,
+        direction_id=student.direction_id
+    )
+
     try:
         await message.answer(
             f"✅ Тест аяқталды! Сен {correct}/{total} дұрыс жауап бердің 🎉\n\n"
@@ -213,30 +221,125 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
             reply_markup=test_start_kb()
         )
 
-    if first_video:
+    if first_video or second_video:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Бірінші таңдау пән", callback_data="show_first_video")],
+            [InlineKeyboardButton(text="Екінші таңдау пән", callback_data="show_second_video")]
+        ])
         try:
-            await message.answer(
-                f"🎥 Бірінші таңдау пәнге арналған сабақ: {first_video.title}\nСілтеме: {first_video.url}"
-            )
+            msg = await message.answer("Бейне сабақты таңдаңыз:", reply_markup=keyboard)
+            await state.update_data(video_choice_message_id=msg.message_id)
         except TelegramNetworkError as e:
-            logging.error(f"Бірінші видео жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            await message.answer("❌ Бірінші видео жіберу мүмкін болмады. Кейінірек қайталаңыз")
+            logging.error(f"Бейнені жіберуде ақау пайда болды: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Сосын қайталап көріңіз")
         except Exception as e:
-            logging.error(f"Бірінші видео жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            await message.answer("❌ Бірінші видео жіберу кезінде техникалық ақау туындады")
+            logging.error(f"Бейнені жіберуде ақау пайда болды: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await message.answer("❌ Техникалық ақау")
 
-    if second_video:
+@router.callback_query(F.data.in_(["show_first_video", "show_second_video"]))
+async def process_video_choice(callback: types.CallbackQuery, state: FSMContext):
+    bot = callback.bot
+    data = await state.get_data()
+    video_choice_message_id = data.get("video_choice_message_id")
+    chat_id = callback.message.chat.id
+
+    if video_choice_message_id:
         try:
-            await message.answer(
-                f"🎥 Екінші таңдау пәнге арналған сабақ: {second_video.title}\nСілтеме: {second_video.url}"
-            )
+            await bot.delete_message(chat_id, video_choice_message_id)
         except TelegramNetworkError as e:
-            logging.error(f"Екінші видео жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            await message.answer("❌ Екінші видео жіберу мүмкін болмады. Кейінірек қайталаңыз")
+            logging.warning(f"Хабарламаны өшіруде техникалық ақау {video_choice_message_id}: {e}")
         except Exception as e:
-            logging.error(f"Екінші видео жіберу кезіндегі ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            await message.answer("❌ Екінші видео жіберу кезінде техникалық ақау туындады")
+            logging.warning(f"Хабарламаны өшіруде техникалық ақау: {e}")
 
+    first_video = data.get("first_video")
+    second_video = data.get("second_video")
+
+    if callback.data == "show_first_video" and first_video:
+        try:
+            msg = await callback.message.answer(
+                f"🎥 Бірінші таңдау пәнге арналған сабақ: {first_video.title}\nСілтеме: {first_video.url}",
+                reply_markup=switch_keyboard
+            )
+            await state.update_data(current_video_message_id=msg.message_id, current_video_type="first")
+        except TelegramNetworkError as e:
+            logging.error(f"Бейнені жіберуде ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Сосын қайталап көріңіз")
+        except Exception as e:
+            logging.error(f"Бейнені жіберуде ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+    elif callback.data == "show_second_video" and second_video:
+        try:
+            msg = await callback.message.answer(
+                f"🎥 Екінші таңдау пәнге арналған сабақ: {second_video.title}\nСілтеме: {second_video.url}",
+                reply_markup=switch_keyboard
+            )
+            await state.update_data(current_video_message_id=msg.message_id, current_video_type="second")
+        except TelegramNetworkError as e:
+            logging.error(f"{e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+        except Exception as e:
+            logging.error(f"{e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+    else:
+        await callback.answer("Бейне табылмады")
+
+    await callback.answer()
+
+    await asyncio.sleep(2)
+    await send_course_info(callback.message, bot)
+
+@router.callback_query(F.data == "switch_video")
+async def switch_video(callback: types.CallbackQuery, state: FSMContext):
+    bot = callback.bot
+    data = await state.get_data()
+    current_video_message_id = data.get("current_video_message_id")
+    current_video_type = data.get("current_video_type")
+    chat_id = callback.message.chat.id
+
+    if current_video_message_id:
+        try:
+            await bot.delete_message(chat_id, current_video_message_id)
+        except TelegramNetworkError as e:
+            logging.warning(f"Бейне өшірілмеді{current_video_message_id}: {e}")
+        except Exception as e:
+            logging.warning(f"Бейне өшірілмеді: {e}")
+
+    first_video = data.get("first_video")
+    second_video = data.get("second_video")
+
+    if current_video_type == "first" and second_video:
+        try:
+            msg = await callback.message.answer(
+                f"🎥 Екінші таңдау пәнге арналған сабақ: {second_video.title}\nСілтеме: {second_video.url}",
+                reply_markup=switch_keyboard
+            )
+            await state.update_data(current_video_message_id=msg.message_id, current_video_type="second")
+        except TelegramNetworkError as e:
+            logging.error(f"{e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+        except Exception as e:
+            logging.error(f"{e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+    elif current_video_type == "second" and first_video:
+        try:
+            msg = await callback.message.answer(
+                f"🎥 Бірінші таңдау пәнге арналған сабақ: {first_video.title}\nСілтеме: {first_video.url}",
+                reply_markup=switch_keyboard
+            )
+            await state.update_data(current_video_message_id=msg.message_id, current_video_type="first")
+        except TelegramNetworkError as e:
+            logging.error(f"Ошибка отправки первого видео при смене: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Не удалось отправить видео. Попробуйте позже")
+        except Exception as e:
+            logging.error(f"Ошибка отправки первого видео при смене: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await callback.answer("❌ Техникалық ақау")
+    else:
+        await callback.answer("Басқа бейне жоқ")
+
+    await callback.answer()
+
+async def send_course_info(message: types.Message, bot: Bot):
+    await asyncio.sleep(300)
     try:
         photo = FSInputFile("media/hqdefault.jpg")  
         await message.answer_photo(photo, caption="📸 Арнайы курс туралы ақпарат!")
@@ -251,7 +354,6 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
 
     try:
         await message.answer(course_text)
-        await asyncio.sleep(0.5)
         await message.answer("Курсқа тіркелу 👇", reply_markup=course_button)
     except TelegramNetworkError as e:
         logging.error(f"Курс хабарламасын жіберу кезіндегі желілік ақау: {e} в {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -261,4 +363,3 @@ async def finish_test(message: types.Message, state: FSMContext, bot: Bot):
         await message.answer("❌ Техникалық ақау туындады. Кейінірек қайталаңыз")
 
     await schedule_discount_reminders(bot, message.chat.id)
-    await state.clear()
